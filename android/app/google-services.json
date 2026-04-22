@@ -1,0 +1,125 @@
+{
+  "project_info": {
+    "project_number": "220709150346",
+    "firebase_url": "https://flutter-ec8ec-default-rtdb.firebaseio.com",
+    "project_id": "flutter-ec8ec",
+    "storage_bucket": "flutter-ec8ec.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:a6709e6de626aeebbf5773",
+        "android_client_info": {
+          "package_name": "com.example.app_gym"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:57776204c00fc7cbbf5773",
+        "android_client_info": {
+          "package_name": "com.example.contador"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:aac9ab55a327e3a5bf5773",
+        "android_client_info": {
+          "package_name": "com.example.crud_aplication"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:6845ff6fa7f023c5bf5773",
+        "android_client_info": {
+          "package_name": "com.example.practica"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:bd0b184016ec0205bf5773",
+        "android_client_info": {
+          "package_name": "com.example.practicafinal"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220709150346:android:d64cf50591ae60edbf5773",
+        "android_client_info": {
+          "package_name": "com.flutterpractica"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-3CyosI-1RdmiPgDF07AVEkYX5_R1N0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

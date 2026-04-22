@@ -1,0 +1,844 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/app_provider.dart';
+import '../models/additional_income.dart';
+import '../models/category.dart';
+import '../models/monthly_budget.dart';
+import '../theme/app_theme.dart';
+
+class BudgetSetupScreen extends StatefulWidget {
+  const BudgetSetupScreen({super.key});
+
+  @override
+  State<BudgetSetupScreen> createState() => _BudgetSetupScreenState();
+}
+
+class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
+  final _formKey = GlobalKey<FormState>();
+
+  // Income base
+  final _incomeController = TextEditingController();
+  final _incomeCashController = TextEditingController();
+  final _incomeBankController = TextEditingController();
+  bool _splitIncome = false;
+
+  // Ingresos adicionales
+  final List<_AdditionalIncomeRow> _additionalRows = [];
+
+  // Budget
+  final _totalController = TextEditingController();
+  bool _useCategoryBudgets = false;
+  final Map<String, TextEditingController> _catControllers = {};
+
+  // Quincenas
+  bool _splitByFortnight = false;
+  final _fortnight1Controller = TextEditingController();
+  final _fortnight2Controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    for (final cat in Category.defaults) {
+      _catControllers[cat.id] = TextEditingController();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final b = context.read<AppProvider>().budget;
+      if (b != null) {
+        _incomeController.text =
+            b.income > 0 ? b.income.toStringAsFixed(2) : '';
+        _incomeCashController.text =
+            b.incomeCash > 0 ? b.incomeCash.toStringAsFixed(2) : '';
+        _incomeBankController.text =
+            b.incomeBank > 0 ? b.incomeBank.toStringAsFixed(2) : '';
+        _splitIncome = b.splitIncome;
+        _totalController.text =
+            b.totalBudget > 0 ? b.totalBudget.toStringAsFixed(2) : '';
+        _useCategoryBudgets = b.useCategoryBudgets;
+        _splitByFortnight = b.splitByFortnight;
+        _fortnight1Controller.text =
+            (b.fortnightBudgets['1'] ?? 0) > 0
+                ? (b.fortnightBudgets['1']!).toStringAsFixed(2)
+                : '';
+        _fortnight2Controller.text =
+            (b.fortnightBudgets['2'] ?? 0) > 0
+                ? (b.fortnightBudgets['2']!).toStringAsFixed(2)
+                : '';
+        for (final e in b.categoryBudgets.entries) {
+          _catControllers[e.key]?.text =
+              e.value > 0 ? e.value.toStringAsFixed(2) : '';
+        }
+        for (final ai in b.additionalIncomes) {
+          final labelCtrl = TextEditingController(text: ai.label);
+          final amountCtrl = TextEditingController(
+              text: ai.amount > 0 ? ai.amount.toStringAsFixed(2) : '');
+          labelCtrl.addListener(() => setState(() {}));
+          amountCtrl.addListener(() => setState(() {}));
+          _additionalRows
+              .add(_AdditionalIncomeRow(id: ai.id, label: labelCtrl, amount: amountCtrl));
+        }
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _incomeController.dispose();
+    _incomeCashController.dispose();
+    _incomeBankController.dispose();
+    _totalController.dispose();
+    _fortnight1Controller.dispose();
+    _fortnight2Controller.dispose();
+    for (final c in _catControllers.values) c.dispose();
+    for (final r in _additionalRows) {
+      r.label.dispose();
+      r.amount.dispose();
+    }
+    super.dispose();
+  }
+
+  double _parse(TextEditingController c) =>
+      double.tryParse(c.text.replaceAll(',', '.')) ?? 0.0;
+
+  double get _sumCategories =>
+      _catControllers.values.fold(0.0, (s, c) => s + _parse(c));
+
+  double get _sumAdditional =>
+      _additionalRows.fold(0.0, (s, r) => s + _parse(r.amount));
+
+  double get _totalIncomeSummary => _parse(_incomeController) + _sumAdditional;
+
+  void _addAdditionalRow() {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final labelCtrl = TextEditingController();
+    final amountCtrl = TextEditingController();
+    labelCtrl.addListener(() => setState(() {}));
+    amountCtrl.addListener(() => setState(() {}));
+    setState(() {
+      _additionalRows
+          .add(_AdditionalIncomeRow(id: id, label: labelCtrl, amount: amountCtrl));
+    });
+  }
+
+  void _removeAdditionalRow(String id) {
+    setState(() {
+      _additionalRows.removeWhere((r) => r.id == id);
+    });
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final catBudgets = <String, double>{};
+    if (_useCategoryBudgets) {
+      for (final cat in Category.defaults) {
+        final v = _parse(_catControllers[cat.id]!);
+        if (v > 0) catBudgets[cat.id] = v;
+      }
+    }
+
+    final fortnightBudgets = <String, double>{};
+    if (_splitByFortnight) {
+      final f1 = _parse(_fortnight1Controller);
+      final f2 = _parse(_fortnight2Controller);
+      if (f1 > 0) fortnightBudgets['1'] = f1;
+      if (f2 > 0) fortnightBudgets['2'] = f2;
+    }
+
+    final additionalIncomes = _additionalRows
+        .where((r) => r.label.text.trim().isNotEmpty)
+        .map((r) => AdditionalIncome(
+              id: r.id,
+              label: r.label.text.trim(),
+              amount: _parse(r.amount),
+            ))
+        .toList();
+
+    final provider = context.read<AppProvider>();
+    await provider.saveBudget(MonthlyBudget(
+      monthKey: provider.monthKey,
+      income: _parse(_incomeController),
+      incomeCash: _splitIncome ? _parse(_incomeCashController) : 0,
+      incomeBank: _splitIncome ? _parse(_incomeBankController) : 0,
+      splitIncome: _splitIncome,
+      additionalIncomes: additionalIncomes,
+      totalBudget: _parse(_totalController),
+      useCategoryBudgets: _useCategoryBudgets,
+      categoryBudgets: catBudgets,
+      splitByFortnight: _splitByFortnight,
+      fortnightBudgets: fortnightBudgets,
+    ));
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Configurar mes'),
+        backgroundColor: AppTheme.background,
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // ── INGRESOS ─────────────────────────────────────────────────
+            _SectionHeader(
+              icon: Icons.trending_up_rounded,
+              label: 'Ingresos del mes',
+              color: AppTheme.income,
+            ),
+            const SizedBox(height: 12),
+            _DarkField(
+              controller: _incomeController,
+              hint: '0.00',
+              label: 'Ingreso base',
+              prefix: '€ ',
+              icon: Icons.account_balance_wallet_rounded,
+              color: AppTheme.income,
+              onChanged: (_) => setState(() {}),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Introduce los ingresos';
+                if (double.tryParse(v.replaceAll(',', '.')) == null) {
+                  return 'Valor inválido';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Toggle split efectivo/banco
+            _DarkToggle(
+              value: _splitIncome,
+              onChanged: (v) => setState(() => _splitIncome = v),
+              icon: Icons.compare_arrows_rounded,
+              title: 'Separar efectivo / banco',
+              subtitle: 'Divide tus ingresos entre efectivo y cuenta bancaria',
+            ),
+
+            if (_splitIncome) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DarkField(
+                      controller: _incomeCashController,
+                      hint: '0.00',
+                      label: 'Efectivo',
+                      prefix: '€ ',
+                      icon: Icons.payments_rounded,
+                      color: AppTheme.cash,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DarkField(
+                      controller: _incomeBankController,
+                      hint: '0.00',
+                      label: 'Banco',
+                      prefix: '€ ',
+                      icon: Icons.account_balance_rounded,
+                      color: AppTheme.bank,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _SplitSumIndicator(
+                cash: _parse(_incomeCashController),
+                bank: _parse(_incomeBankController),
+                total: _parse(_incomeController),
+              ),
+            ],
+
+            const SizedBox(height: 20),
+
+            // ── INGRESOS ADICIONALES ──────────────────────────────────────
+            const Divider(color: AppTheme.border),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ingresos adicionales',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Sueldo extra, servicios, otros…',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+                ElevatedButton.icon(
+                  onPressed: _addAdditionalRow,
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('Añadir'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.income,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    textStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.bold),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            if (_additionalRows.isEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        color: AppTheme.textSecondary.withOpacity(0.5),
+                        size: 16),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Pulsa "Añadir" para incluir más fuentes de ingresos',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              )
+            else ...[
+              ..._additionalRows.map((row) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _AdditionalIncomeField(
+                      row: row,
+                      onRemove: () => _removeAdditionalRow(row.id),
+                      onChanged: () => setState(() {}),
+                    ),
+                  )),
+            ],
+
+            if (_additionalRows.isNotEmpty || _parse(_incomeController) > 0) ...[
+              const SizedBox(height: 8),
+              _TotalIncomeIndicator(
+                base: _parse(_incomeController),
+                additional: _sumAdditional,
+                total: _totalIncomeSummary,
+              ),
+            ],
+
+            const SizedBox(height: 28),
+            const Divider(color: AppTheme.border),
+            const SizedBox(height: 28),
+
+            // ── PRESUPUESTO ───────────────────────────────────────────────
+            _SectionHeader(
+              icon: Icons.donut_large_rounded,
+              label: 'Presupuesto de gastos',
+              color: AppTheme.primary,
+            ),
+            const SizedBox(height: 12),
+            _DarkField(
+              controller: _totalController,
+              hint: '0.00',
+              label: 'Presupuesto total',
+              prefix: '€ ',
+              icon: Icons.savings_rounded,
+              color: AppTheme.primary,
+              onChanged: (_) => setState(() {}),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Introduce el presupuesto';
+                final n = double.tryParse(v.replaceAll(',', '.'));
+                if (n == null || n <= 0) return 'Importe inválido';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Toggle quincenas
+            _DarkToggle(
+              value: _splitByFortnight,
+              onChanged: (v) => setState(() => _splitByFortnight = v),
+              icon: Icons.calendar_view_week_rounded,
+              title: 'Dividir en quincenas',
+              subtitle: '1ª quincena: días 1-15 · 2ª quincena: días 16-fin',
+            ),
+
+            if (_splitByFortnight) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DarkField(
+                      controller: _fortnight1Controller,
+                      hint: '0.00',
+                      label: '1ª (1-15)',
+                      prefix: '€ ',
+                      icon: Icons.looks_one_rounded,
+                      color: AppTheme.primary,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DarkField(
+                      controller: _fortnight2Controller,
+                      hint: '0.00',
+                      label: '2ª (16-fin)',
+                      prefix: '€ ',
+                      icon: Icons.looks_two_rounded,
+                      color: const Color(0xFFB39DDB),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _BudgetSumIndicator(
+                assigned: _parse(_fortnight1Controller) +
+                    _parse(_fortnight2Controller),
+                total: _parse(_totalController),
+                label: 'Quincenas',
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            // Toggle categorías
+            _DarkToggle(
+              value: _useCategoryBudgets,
+              onChanged: (v) => setState(() => _useCategoryBudgets = v),
+              icon: Icons.pie_chart_rounded,
+              title: 'Dividir por categorías',
+              subtitle: 'Asigna una parte del presupuesto a cada categoría',
+            ),
+
+            if (_useCategoryBudgets) ...[
+              const SizedBox(height: 20),
+              ...Category.defaults.map((cat) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _CategoryField(
+                      cat: cat,
+                      controller: _catControllers[cat.id]!,
+                      onChanged: () => setState(() {}),
+                    ),
+                  )),
+              const SizedBox(height: 8),
+              _BudgetSumIndicator(
+                assigned: _sumCategories,
+                total: _parse(_totalController),
+                label: 'Categorías',
+              ),
+            ],
+
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: _save,
+              child: const Text('Guardar'),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Additional income row model ─────────────────────────────────────────────
+
+class _AdditionalIncomeRow {
+  final String id;
+  final TextEditingController label;
+  final TextEditingController amount;
+  _AdditionalIncomeRow(
+      {required this.id, required this.label, required this.amount});
+}
+
+// ─── Additional income field widget ──────────────────────────────────────────
+
+class _AdditionalIncomeField extends StatelessWidget {
+  final _AdditionalIncomeRow row;
+  final VoidCallback onRemove;
+  final VoidCallback onChanged;
+
+  const _AdditionalIncomeField(
+      {required this.row, required this.onRemove, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.income.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.attach_money_rounded,
+              color: AppTheme.income, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 3,
+            child: TextField(
+              controller: row.label,
+              style:
+                  const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              onChanged: (_) => onChanged(),
+              decoration: const InputDecoration(
+                hintText: 'Concepto (ej: Sueldo, Servicios…)',
+                hintStyle:
+                    TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 90,
+            child: TextField(
+              controller: row.amount,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(
+                  color: AppTheme.income,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14),
+              onChanged: (_) => onChanged(),
+              textAlign: TextAlign.right,
+              decoration: const InputDecoration(
+                hintText: '0.00',
+                hintStyle: TextStyle(color: AppTheme.textSecondary),
+                prefixText: '€ ',
+                prefixStyle: TextStyle(
+                    color: AppTheme.income, fontWeight: FontWeight.bold),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: onRemove,
+            icon: const Icon(Icons.delete_outline_rounded,
+                color: AppTheme.danger, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Total income indicator ───────────────────────────────────────────────────
+
+class _TotalIncomeIndicator extends StatelessWidget {
+  final double base;
+  final double additional;
+  final double total;
+
+  const _TotalIncomeIndicator(
+      {required this.base, required this.additional, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.income.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.income.withOpacity(0.25)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Row(children: [
+            Icon(Icons.functions_rounded, color: AppTheme.income, size: 16),
+            SizedBox(width: 6),
+            Text('Total ingresos',
+                style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ]),
+          Text(
+            AppTheme.formatCurrency(total),
+            style: const TextStyle(
+                color: AppTheme.income,
+                fontSize: 14,
+                fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _SectionHeader(
+      {required this.icon, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DarkToggle extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _DarkToggle({
+    required this.value,
+    required this.onChanged,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: SwitchListTile(
+        value: value,
+        onChanged: onChanged,
+        title: Text(title,
+            style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 14)),
+        subtitle: Text(subtitle,
+            style: const TextStyle(
+                color: AppTheme.textSecondary, fontSize: 12)),
+        secondary: Icon(icon, color: AppTheme.primary, size: 22),
+        activeColor: AppTheme.primary,
+      ),
+    );
+  }
+}
+
+class _DarkField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final String label;
+  final String prefix;
+  final IconData icon;
+  final Color color;
+  final ValueChanged<String>? onChanged;
+  final FormFieldValidator<String>? validator;
+
+  const _DarkField({
+    required this.controller,
+    required this.hint,
+    required this.label,
+    required this.prefix,
+    required this.icon,
+    required this.color,
+    this.onChanged,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+      onChanged: onChanged,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixText: prefix,
+        prefixStyle: TextStyle(
+            color: color, fontWeight: FontWeight.bold, fontSize: 16),
+        prefixIcon: Icon(icon, color: color, size: 20),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: color, width: 2),
+        ),
+        labelStyle: TextStyle(color: color.withOpacity(0.8)),
+      ),
+    );
+  }
+}
+
+class _CategoryField extends StatelessWidget {
+  final Category cat;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  const _CategoryField(
+      {required this.cat,
+      required this.controller,
+      required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      style: const TextStyle(color: AppTheme.textPrimary),
+      onChanged: (_) => onChanged(),
+      decoration: InputDecoration(
+        labelText: cat.name,
+        hintText: '0.00',
+        prefixText: '€ ',
+        prefixStyle:
+            TextStyle(color: cat.color, fontWeight: FontWeight.bold),
+        prefixIcon: CircleAvatar(
+          radius: 16,
+          backgroundColor: cat.color.withOpacity(0.18),
+          child: Icon(cat.icon, color: cat.color, size: 16),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: cat.color, width: 2),
+        ),
+        labelStyle: TextStyle(color: cat.color.withOpacity(0.8)),
+      ),
+    );
+  }
+}
+
+class _SplitSumIndicator extends StatelessWidget {
+  final double cash;
+  final double bank;
+  final double total;
+  const _SplitSumIndicator(
+      {required this.cash, required this.bank, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final sum = cash + bank;
+    final diff = total - sum;
+    final isOver = diff < 0;
+    final color = isOver ? AppTheme.danger : AppTheme.success;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+              isOver
+                  ? Icons.warning_amber_rounded
+                  : Icons.check_circle_rounded,
+              color: color,
+              size: 16),
+          const SizedBox(width: 8),
+          Text(
+            isOver
+                ? 'Excede el total en ${AppTheme.formatCurrency(diff.abs())}'
+                : diff == 0
+                    ? 'Reparto perfecto ✓'
+                    : '${AppTheme.formatCurrency(diff)} sin asignar',
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BudgetSumIndicator extends StatelessWidget {
+  final double assigned;
+  final double total;
+  final String label;
+  const _BudgetSumIndicator(
+      {required this.assigned, required this.total, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = total - assigned;
+    final isOver = diff < 0;
+    final color = isOver ? AppTheme.danger : AppTheme.success;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(children: [
+            Icon(
+                isOver
+                    ? Icons.warning_amber_rounded
+                    : Icons.check_circle_rounded,
+                color: color,
+                size: 16),
+            const SizedBox(width: 8),
+            Text('$label: ${AppTheme.formatCurrency(assigned)}',
+                style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ]),
+          Text(
+            isOver
+                ? '-${AppTheme.formatCurrency(diff.abs())}'
+                : '+${AppTheme.formatCurrency(diff)}',
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
