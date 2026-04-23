@@ -1189,7 +1189,12 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
     with TickerProviderStateMixin {
   late final AnimationController _slideCtrl;
   late final AnimationController _staggerCtrl;
+  late final AnimationController _txCtrl;
   late final Animation<Offset> _slideAnim;
+  late final CurvedAnimation _txCurve;
+
+  Category? _detailCat;
+  bool _inTxView = false;
 
   static const _wd = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   static const _mo = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -1202,6 +1207,12 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
         vsync: this, duration: const Duration(milliseconds: 380));
     _staggerCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
+    _txCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 380));
+    _txCurve = CurvedAnimation(
+        parent: _txCtrl,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic);
     _slideAnim = Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero)
         .animate(
@@ -1214,6 +1225,8 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
   void dispose() {
     _slideCtrl.dispose();
     _staggerCtrl.dispose();
+    _txCtrl.dispose();
+    _txCurve.dispose();
     super.dispose();
   }
 
@@ -1229,6 +1242,134 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
               parent: _staggerCtrl,
               curve: Interval(start, end, curve: Curves.easeOutCubic)));
 
+  // ── Transaction view (replaces overview in-place) ──────────────────
+  void _openTxView(Category? cat) {
+    setState(() {
+      _detailCat = cat;
+      _inTxView = true;
+    });
+    _txCtrl.forward(from: 0);
+  }
+
+  void _closeTxView() {
+    _txCtrl.reverse().then((_) {
+      if (mounted) setState(() { _inTxView = false; _detailCat = null; });
+    });
+  }
+
+  Widget _buildTxView(List<Expense> all) {
+    final filtered = (_detailCat != null
+            ? all.where((e) => e.categoryId == _detailCat!.id)
+            : all.cast<Expense>())
+        .toList();
+    final total = filtered.fold(0.0, (s, e) => s + e.amount);
+    final cat = _detailCat;
+    final accentColor = cat?.color ?? AppTheme.textPrimary;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Colored accent strip ────────────────────────────────────
+        Container(
+          height: 3,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [
+              accentColor.withOpacity(0.7),
+              accentColor.withOpacity(0.15),
+            ]),
+          ),
+        ),
+        // ── Header ──────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              GestureDetector(
+                onTap: _closeTxView,
+                child: Icon(Icons.arrow_back_ios_new_rounded,
+                    color: AppTheme.textSecondary.withOpacity(0.5), size: 18),
+              ),
+              const SizedBox(width: 14),
+              if (cat != null)
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: accentColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: accentColor.withOpacity(0.2), width: 1),
+                  ),
+                  child: Icon(cat.icon, color: accentColor, size: 18),
+                ),
+              if (cat != null) const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      cat?.name ?? 'Todos los movimientos',
+                      style: TextStyle(
+                          color: cat != null
+                              ? accentColor
+                              : AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: -0.3),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      '${filtered.length} ${filtered.length == 1 ? 'transacción' : 'transacciones'}'
+                      '  ·  ${AppTheme.formatCurrency(total)}',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary.withOpacity(0.4),
+                          fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Divider(
+            color: AppTheme.border.withOpacity(0.22),
+            height: 24,
+            indent: 20,
+            endIndent: 20),
+        // ── List ────────────────────────────────────────────────────
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text('Sin movimientos',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary.withOpacity(0.35),
+                          fontSize: 13)))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) {
+                    final e = filtered[i];
+                    final exCat = Category.defaults.firstWhere(
+                        (c) => c.id == e.categoryId,
+                        orElse: () => Category.defaults.last);
+                    final h = e.date.hour.toString().padLeft(2, '0');
+                    final m = e.date.minute.toString().padLeft(2, '0');
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _TimelineRow(
+                          time: '$h:$m',
+                          cat: exCat,
+                          expense: e,
+                          isLast: true),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final expenses = List<Expense>.from(widget.expenses)
@@ -1237,7 +1378,6 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
     final dateLabel =
         '${_wd[widget.date.weekday - 1]}, ${widget.date.day} de ${_mo[widget.date.month - 1]}';
 
-    // ── Por categoría ──────────────────────────────────────────────────
     final Map<String, double> byCategory = {};
     for (final e in expenses) {
       byCategory[e.categoryId] = (byCategory[e.categoryId] ?? 0) + e.amount;
@@ -1249,7 +1389,6 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
             orElse: () => Category.defaults.last)
         : null;
 
-    // ── Por franja horaria ─────────────────────────────────────────────
     final slots = {
       'morning':   _SlotData('Mañana',    '6–12h',  Icons.wb_sunny_rounded,    const Color(0xFFFDCB6E)),
       'afternoon': _SlotData('Tarde',     '12–18h', Icons.wb_cloudy_rounded,   const Color(0xFF74B9FF)),
@@ -1269,12 +1408,366 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
         .map((k) => slots[k]!)
         .toList();
 
+    // ── Overview widget (built once, animated) ────────────────────────
+    final overview = SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          FadeTransition(
+            opacity: _fade(0.0, 0.35),
+            child: SlideTransition(
+              position: _slide(0.0, 0.35),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(dateLabel,
+                            style: TextStyle(
+                                color: AppTheme.textSecondary.withOpacity(0.55),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3)),
+                        const SizedBox(height: 4),
+                        Text(AppTheme.formatCurrency(total),
+                            style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 42,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -2)),
+                        Text(
+                            '${expenses.length} ${expenses.length == 1 ? 'gasto' : 'gastos'}',
+                            style: TextStyle(
+                                color: AppTheme.textSecondary.withOpacity(0.45),
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  if (dominantCat != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: dominantCat.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: dominantCat.color.withOpacity(0.2)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(dominantCat.icon,
+                              color: dominantCat.color, size: 22),
+                          const SizedBox(height: 4),
+                          Text(dominantCat.name,
+                              style: TextStyle(
+                                  color: dominantCat.color,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.3)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Stacked bar + legend
+          FadeTransition(
+            opacity: _fade(0.08, 0.4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    height: 8,
+                    child: Row(
+                      children: catEntries.asMap().entries.map((entry) {
+                        final i = entry.key;
+                        final e = entry.value;
+                        final cat = Category.defaults.firstWhere(
+                            (c) => c.id == e.key,
+                            orElse: () => Category.defaults.last);
+                        final flex = ((e.value / total) * 1000)
+                            .round()
+                            .clamp(1, 1000);
+                        return Expanded(
+                          flex: flex,
+                          child: Container(
+                            color: cat.color.withOpacity(i == 0
+                                ? 0.9
+                                : (0.65 - i * 0.07).clamp(0.15, 0.65)),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: catEntries.map((entry) {
+                      final cat = Category.defaults.firstWhere(
+                          (c) => c.id == entry.key,
+                          orElse: () => Category.defaults.last);
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 14),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                  color: cat.color, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(cat.name,
+                                style: TextStyle(
+                                    color:
+                                        AppTheme.textSecondary.withOpacity(0.55),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Por categoría
+          FadeTransition(
+            opacity: _fade(0.18, 0.52),
+            child: SlideTransition(
+              position: _slide(0.18, 0.52),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('POR CATEGORÍA',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary.withOpacity(0.4),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.4)),
+                  const SizedBox(height: 10),
+                  ...catEntries.map((entry) {
+                    final cat = Category.defaults.firstWhere(
+                        (c) => c.id == entry.key,
+                        orElse: () => Category.defaults.last);
+                    final pct = total > 0 ? entry.value / total : 0.0;
+                    final pctLabel =
+                        '${(pct * 100).toStringAsFixed(0)}%';
+                    return GestureDetector(
+                      onTap: () => _openTxView(cat),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface.withOpacity(0.28),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border(
+                              left: BorderSide(color: cat.color, width: 3)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: cat.color.withOpacity(0.13),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(cat.icon,
+                                    color: cat.color, size: 16),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(cat.name,
+                                        style: const TextStyle(
+                                            color: AppTheme.textPrimary,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600)),
+                                    const SizedBox(height: 5),
+                                    ClipRRect(
+                                      borderRadius:
+                                          BorderRadius.circular(3),
+                                      child: LinearProgressIndicator(
+                                        value: pct,
+                                        minHeight: 3,
+                                        backgroundColor:
+                                            cat.color.withOpacity(0.1),
+                                        valueColor:
+                                            AlwaysStoppedAnimation(
+                                                cat.color.withOpacity(0.65)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(AppTheme.formatCurrency(entry.value),
+                                      style: TextStyle(
+                                          color: cat.color,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 3),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: cat.color.withOpacity(0.12),
+                                      borderRadius:
+                                          BorderRadius.circular(6),
+                                    ),
+                                    child: Text(pctLabel,
+                                        style: TextStyle(
+                                            color: cat.color.withOpacity(0.8),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(Icons.chevron_right_rounded,
+                                  color:
+                                      AppTheme.textSecondary.withOpacity(0.3),
+                                  size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+
+          // Cuándo gastaste
+          FadeTransition(
+            opacity: _fade(0.32, 0.62),
+            child: SlideTransition(
+              position: _slide(0.32, 0.62),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 24),
+                  Text('CUÁNDO GASTASTE',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary.withOpacity(0.4),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.4)),
+                  const SizedBox(height: 12),
+                  LayoutBuilder(builder: (ctx, constraints) {
+                    final w = (constraints.maxWidth - 8) / 2;
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: orderedSlots
+                          .map((s) => SizedBox(
+                              width: w,
+                              child: _TimeSlotCard(slot: s, total: total)))
+                          .toList(),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+
+          // Detalle / Timeline
+          FadeTransition(
+            opacity: _fade(0.48, 0.9),
+            child: SlideTransition(
+              position: _slide(0.48, 0.9),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 24),
+                  Text('DETALLE',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary.withOpacity(0.4),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.4)),
+                  const SizedBox(height: 12),
+                  ...expenses.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final e = entry.value;
+                    final cat = Category.defaults.firstWhere(
+                        (c) => c.id == e.categoryId,
+                        orElse: () => Category.defaults.last);
+                    final h = e.date.hour.toString().padLeft(2, '0');
+                    final m = e.date.minute.toString().padLeft(2, '0');
+                    return _TimelineRow(
+                        time: '$h:$m',
+                        cat: cat,
+                        expense: e,
+                        isLast: i == expenses.length - 1);
+                  }),
+                  const SizedBox(height: 8),
+                  Divider(color: AppTheme.border.withOpacity(0.3), height: 1),
+                  GestureDetector(
+                    onTap: () => _openTxView(null),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Row(
+                        children: [
+                          Text('Todos los movimientos',
+                              style: TextStyle(
+                                  color:
+                                      AppTheme.textSecondary.withOpacity(0.5),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500)),
+                          const Spacer(),
+                          Text('${expenses.length}',
+                              style: TextStyle(
+                                  color:
+                                      AppTheme.textSecondary.withOpacity(0.3),
+                                  fontSize: 12)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.arrow_forward_rounded,
+                              color: AppTheme.textSecondary.withOpacity(0.25),
+                              size: 13),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // ── Sheet skeleton ────────────────────────────────────────────────
     return SlideTransition(
       position: _slideAnim,
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.9,
-        ),
+            maxHeight: MediaQuery.of(context).size.height * 0.9),
         child: Container(
           decoration: const BoxDecoration(
             color: AppTheme.cardBg,
@@ -1287,377 +1780,95 @@ class _DayDetailSheetState extends State<_DayDetailSheet>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ── Handle ────────────────────────────────────────────────
+              // Handle
               const SizedBox(height: 12),
               Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                     color: AppTheme.border,
                     borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 20),
 
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+              // ── Morph area ──────────────────────────────────────────
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (ctx, bc) {
+                    // Pre-build animations once — safe, no inline Opacity math
+                    final overviewFade = Tween<double>(begin: 1.0, end: 0.0)
+                        .animate(CurvedAnimation(
+                            parent: _txCtrl,
+                            curve: const Interval(0.0, 0.55,
+                                curve: Curves.easeOutCubic)));
+                    final panelSlide = Tween<double>(begin: 1.0, end: 0.0)
+                        .animate(CurvedAnimation(
+                            parent: _txCtrl,
+                            curve: const Interval(0.0, 1.0,
+                                curve: Curves.easeOutCubic)));
+                    final panelFade = Tween<double>(begin: 0.0, end: 1.0)
+                        .animate(CurvedAnimation(
+                            parent: _txCtrl,
+                            curve: const Interval(0.25, 0.75,
+                                curve: Curves.easeOut)));
 
-                      // ── Header ────────────────────────────────────────
-                      FadeTransition(
-                        opacity: _fade(0.0, 0.35),
-                        child: SlideTransition(
-                          position: _slide(0.0, 0.35),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(dateLabel,
-                                        style: TextStyle(
-                                            color: AppTheme.textSecondary
-                                                .withOpacity(0.55),
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            letterSpacing: 0.3)),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      AppTheme.formatCurrency(total),
-                                      style: const TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontSize: 42,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: -2),
-                                    ),
-                                    Text(
-                                      '${expenses.length} ${expenses.length == 1 ? 'gasto' : 'gastos'}',
-                                      style: TextStyle(
-                                          color: AppTheme.textSecondary
-                                              .withOpacity(0.45),
-                                          fontSize: 13),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Dominant category badge
-                              if (dominantCat != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: dominantCat.color.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                        color: dominantCat.color
-                                            .withOpacity(0.2)),
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(dominantCat.icon,
-                                          color: dominantCat.color, size: 22),
-                                      const SizedBox(height: 4),
-                                      Text(dominantCat.name,
-                                          style: TextStyle(
-                                              color: dominantCat.color,
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w700,
-                                              letterSpacing: 0.3)),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    return AnimatedBuilder(
+                      animation: _txCtrl,
+                      builder: (_, __) {
+                        final slideVal = panelSlide.value;
+                        final panelTop = bc.maxHeight * 0.28 * slideVal;
 
-                      const SizedBox(height: 20),
-
-                      // ── Stacked category bar + legend ─────────────────
-                      FadeTransition(
-                        opacity: _fade(0.08, 0.4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        return Stack(
+                          clipBehavior: Clip.hardEdge,
                           children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: SizedBox(
-                                height: 8,
-                                child: Row(
-                                  children: catEntries
-                                      .asMap()
-                                      .entries
-                                      .map((entry) {
-                                    final i = entry.key;
-                                    final e = entry.value;
-                                    final cat =
-                                        Category.defaults.firstWhere(
-                                            (c) => c.id == e.key,
-                                            orElse: () =>
-                                                Category.defaults.last);
-                                    final flex = ((e.value / total) * 1000)
-                                        .round()
-                                        .clamp(1, 1000);
-                                    return Expanded(
-                                      flex: flex,
-                                      child: Container(
-                                        color: cat.color.withOpacity(
-                                            i == 0
-                                                ? 0.9
-                                                : (0.65 - i * 0.07)
-                                                    .clamp(0.15, 0.65)),
-                                      ),
-                                    );
-                                  }).toList(),
+                            // Overview: fades out as panel arrives
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                ignoring: _inTxView &&
+                                    _txCtrl.value > 0.5,
+                                child: FadeTransition(
+                                  opacity: overviewFade,
+                                  child: overview,
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: catEntries.map((entry) {
-                                  final cat = Category.defaults.firstWhere(
-                                      (c) => c.id == entry.key,
-                                      orElse: () => Category.defaults.last);
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 14),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          width: 7,
-                                          height: 7,
-                                          decoration: BoxDecoration(
-                                              color: cat.color,
-                                              shape: BoxShape.circle),
+
+                            // TX panel: slides up from 28% below
+                            if (_inTxView)
+                              Positioned(
+                                top: panelTop,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: FadeTransition(
+                                  opacity: panelFade,
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.cardBg,
+                                      borderRadius: BorderRadius.vertical(
+                                          top: Radius.circular(20)),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          blurRadius: 18,
+                                          offset: Offset(0, -3),
                                         ),
-                                        const SizedBox(width: 5),
-                                        Text(cat.name,
-                                            style: TextStyle(
-                                                color: AppTheme.textSecondary
-                                                    .withOpacity(0.55),
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w500)),
                                       ],
                                     ),
-                                  );
-                                }).toList(),
+                                    child: ClipRRect(
+                                      borderRadius:
+                                          const BorderRadius.vertical(
+                                              top: Radius.circular(20)),
+                                      child: _buildTxView(expenses),
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
                           ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // ── Por categoría ─────────────────────────────────
-                      FadeTransition(
-                        opacity: _fade(0.18, 0.52),
-                        child: SlideTransition(
-                          position: _slide(0.18, 0.52),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('POR CATEGORÍA',
-                                  style: TextStyle(
-                                      color: AppTheme.textSecondary
-                                          .withOpacity(0.4),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.4)),
-                              const SizedBox(height: 10),
-                              ...catEntries.map((entry) {
-                                final cat = Category.defaults.firstWhere(
-                                    (c) => c.id == entry.key,
-                                    orElse: () => Category.defaults.last);
-                                final pct =
-                                    total > 0 ? entry.value / total : 0.0;
-                                final pctLabel =
-                                    '${(pct * 100).toStringAsFixed(0)}%';
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.surface.withOpacity(0.28),
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border(
-                                      left: BorderSide(
-                                          color: cat.color, width: 3),
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        12, 11, 12, 11),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 34,
-                                          height: 34,
-                                          decoration: BoxDecoration(
-                                            color: cat.color.withOpacity(0.13),
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                          child: Icon(cat.icon,
-                                              color: cat.color, size: 16),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(cat.name,
-                                                  style: const TextStyle(
-                                                      color:
-                                                          AppTheme.textPrimary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600)),
-                                              const SizedBox(height: 5),
-                                              ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(3),
-                                                child: LinearProgressIndicator(
-                                                  value: pct,
-                                                  minHeight: 3,
-                                                  backgroundColor: cat.color
-                                                      .withOpacity(0.1),
-                                                  valueColor:
-                                                      AlwaysStoppedAnimation(
-                                                          cat.color.withOpacity(
-                                                              0.65)),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            Text(
-                                              AppTheme.formatCurrency(
-                                                  entry.value),
-                                              style: TextStyle(
-                                                  color: cat.color,
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.bold),
-                                            ),
-                                            const SizedBox(height: 3),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color:
-                                                    cat.color.withOpacity(0.12),
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(pctLabel,
-                                                  style: TextStyle(
-                                                      color: cat.color
-                                                          .withOpacity(0.8),
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.w600)),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // ── Cuándo gastaste ───────────────────────────────
-                      FadeTransition(
-                        opacity: _fade(0.32, 0.62),
-                        child: SlideTransition(
-                          position: _slide(0.32, 0.62),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 24),
-                              Text('CUÁNDO GASTASTE',
-                                  style: TextStyle(
-                                      color: AppTheme.textSecondary
-                                          .withOpacity(0.4),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.4)),
-                              const SizedBox(height: 12),
-                              LayoutBuilder(builder: (ctx, constraints) {
-                                final w = (constraints.maxWidth - 8) / 2;
-                                return Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: orderedSlots
-                                      .map((s) => SizedBox(
-                                          width: w,
-                                          child: _TimeSlotCard(
-                                              slot: s, total: total)))
-                                      .toList(),
-                                );
-                              }),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // ── Detalle / Timeline ────────────────────────────
-                      FadeTransition(
-                        opacity: _fade(0.48, 0.9),
-                        child: SlideTransition(
-                          position: _slide(0.48, 0.9),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 24),
-                              Text('DETALLE',
-                                  style: TextStyle(
-                                      color: AppTheme.textSecondary
-                                          .withOpacity(0.4),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.4)),
-                              const SizedBox(height: 12),
-                              ...expenses.asMap().entries.map((entry) {
-                                final i = entry.key;
-                                final e = entry.value;
-                                final cat = Category.defaults.firstWhere(
-                                    (c) => c.id == e.categoryId,
-                                    orElse: () => Category.defaults.last);
-                                final h = e.date.hour
-                                    .toString()
-                                    .padLeft(2, '0');
-                                final m = e.date.minute
-                                    .toString()
-                                    .padLeft(2, '0');
-                                return _TimelineRow(
-                                  time: '$h:$m',
-                                  cat: cat,
-                                  expense: e,
-                                  isLast: i == expenses.length - 1,
-                                );
-                              }),
-                              const SizedBox(height: 24),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
             ],
